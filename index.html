@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GPS Proximity Alarm</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0f766e">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{--bg:#f6f8f9;--card:#fff;--text:#14202b;--muted:#64748b;--accent:#0f766e;--accent2:#14b8a6;--danger:#dc2626;--line:#e2e8f0;--shadow:0 -8px 30px rgba(0,0,0,.15)}
+[data-theme=dark]{--bg:#0b1117;--card:#131c26;--text:#e6edf3;--muted:#8b9bb0;--accent:#14b8a6;--accent2:#2dd4bf;--line:#223040;--shadow:0 -8px 30px rgba(0,0,0,.5)}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+#app{display:flex;flex-direction:column;height:100%}
+#mapwrap{position:relative;flex:1;min-height:30%}
+#map{position:absolute;inset:0;background:var(--bg)}
+[data-theme=dark] .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9)}
+.bar{position:absolute;z-index:1000;top:max(8px,env(safe-area-inset-top));left:8px;right:8px;display:flex;gap:6px;align-items:center;pointer-events:none}
+.bar>*{pointer-events:auto}
+.chip{background:var(--card);color:var(--text);border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;box-shadow:0 2px 10px rgba(0,0,0,.2);display:flex;align-items:center;gap:6px;border:0}
+.dot{width:9px;height:9px;border-radius:50%;background:#94a3b8}
+.ok .dot{background:#16a34a}.warn .dot{background:#f59e0b}.bad .dot{background:#dc2626}
+.sp{flex:1}
+#sheet{background:var(--card);border-radius:22px 22px 0 0;box-shadow:var(--shadow);padding:14px 16px calc(14px + env(safe-area-inset-bottom));max-height:58%;overflow:auto;z-index:1001}
+.dist{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+#distVal{font-size:40px;font-weight:800;letter-spacing:-1px;color:var(--accent)}
+#distSub{color:var(--muted);font-size:13px}
+.coords{color:var(--muted);font-size:12px;margin:2px 0 10px;font-variant-numeric:tabular-nums}
+button,select,input{font:inherit;color:var(--text)}
+.btn{background:var(--accent);color:#fff;border:0;border-radius:14px;padding:13px 16px;font-weight:700;width:100%;font-size:16px;cursor:pointer}
+.btn.off{background:var(--danger)}
+.btn.sec{background:var(--bg);color:var(--text);border:1px solid var(--line);font-weight:600;font-size:14px;padding:10px 12px;width:auto}
+.row{display:flex;gap:8px;margin:8px 0;flex-wrap:wrap}
+.row>*{flex:1}
+input,select{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;width:100%;min-width:0}
+details{border-top:1px solid var(--line);margin-top:10px;padding-top:8px}
+summary{font-weight:700;cursor:pointer;padding:4px 0}
+.note{color:var(--muted);font-size:12px;margin:6px 0}
+.list{list-style:none;margin:6px 0;padding:0}
+.list li{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.list li span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list button{background:none;border:0;color:var(--accent);font-weight:700;cursor:pointer;padding:4px 8px}
+.list button.del{color:var(--danger)}
+progress{width:100%;height:10px}
+#banner{display:none;background:#fef3c7;color:#78350f;padding:8px 12px;font-size:13px;border-radius:10px;margin-bottom:10px}
+#alarm{position:fixed;inset:0;z-index:5000;background:#b91c1c;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;animation:flash 1s infinite}
+#alarm[hidden]{display:none}
+#alarm h1{font-size:34px;margin:0 0 8px}
+#alarm button{margin-top:30px;background:#fff;color:#b91c1c;border:0;border-radius:18px;padding:20px 40px;font-size:22px;font-weight:800}
+@keyframes flash{50%{background:#7f1d1d}}
+.pin{font-size:26px;line-height:1}
+.me{width:18px;height:18px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 2px #2563eb55,0 2px 8px rgba(0,0,0,.4)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div class="bar">
+      <div class="chip" id="gpsChip"><span class="dot"></span><span id="gpsTxt">GPS: off</span></div>
+      <div class="chip" id="netChip"><span class="dot"></span><span id="netTxt">Online</span></div>
+      <div class="sp"></div>
+      <button class="chip" id="locBtn" title="Centre on me">📍</button>
+      <button class="chip" id="themeBtn" title="Theme">🌓</button>
+    </div>
+  </div>
+
+  <div id="sheet">
+    <div id="banner"></div>
+    <div class="dist"><span id="distVal">--</span><span id="distSub">Tap the map to choose a destination</span></div>
+    <div class="coords" id="coords">Current position: unknown</div>
+    <button class="btn" id="trackBtn">Start tracking</button>
+
+    <details open>
+      <summary>Alarm settings</summary>
+      <div class="row">
+        <select id="radius">
+          <option value="100">100 m</option><option value="250">250 m</option>
+          <option value="500" selected>500 m</option><option value="1000">1 km</option>
+          <option value="2000">2 km</option><option value="custom">Custom…</option>
+        </select>
+        <input id="customR" type="number" min="20" step="10" placeholder="Meters" hidden>
+      </div>
+      <label class="note"><input type="checkbox" id="hiacc" checked style="width:auto"> High-accuracy GPS (uses more battery)</label>
+      <div class="row"><button class="btn sec" id="testBtn">Test alarm sound</button></div>
+    </details>
+
+    <details>
+      <summary>Destination</summary>
+      <div class="row"><input id="q" placeholder="Search place or address (needs internet)"><button class="btn sec" id="qBtn" style="flex:0 0 auto">Search</button></div>
+      <ul class="list" id="results"></ul>
+      <div class="row"><input id="lat" placeholder="Latitude" inputmode="decimal"><input id="lng" placeholder="Longitude" inputmode="decimal"><button class="btn sec" id="setLL" style="flex:0 0 auto">Set</button></div>
+      <div class="row"><button class="btn sec" id="saveFav">★ Save destination</button><button class="btn sec" id="clearDest">Clear</button></div>
+    </details>
+
+    <details>
+      <summary>Saved destinations</summary>
+      <ul class="list" id="favs"></ul>
+      <div class="note" id="noFavs">No saved destinations yet.</div>
+    </details>
+
+    <details>
+      <summary>Offline maps</summary>
+      <div class="note">Pans/zooms to the area you need, then download. Tiles are saved on this device only. Zoom/pan on the map while online also caches what you view.</div>
+      <div class="row"><button class="btn sec" id="dlBtn">⬇ Download visible area</button><button class="btn sec" id="dlCancel" hidden>Cancel</button></div>
+      <progress id="prog" value="0" max="1" hidden></progress>
+      <div class="note" id="dlMsg"></div>
+      <div class="note" id="usage"></div>
+      <div class="row"><input id="tileUrl" placeholder="Tile URL template"><button class="btn sec" id="tileApply" style="flex:0 0 auto">Apply</button></div>
+      <div class="note">Default is the public OpenStreetMap server, whose policy only allows small, polite downloads. For larger areas use your own/commercial tile provider here.</div>
+      <div class="row"><button class="btn sec" id="clearMaps">Delete offline maps</button></div>
+    </details>
+
+    <details>
+      <summary>Privacy &amp; limits</summary>
+      <div class="note">Your location stays on this device. It is never uploaded or stored on a server. Internet is used only for map tiles and (if you search) the place name you type. Tracking only runs after you press Start and stops when you press Stop.</div>
+      <div class="note"><b>Platform limits:</b> a web app cannot run a true background service. Keep this app open (screen stays awake while tracking). If the browser suspends the page, tracking pauses and the app warns you. For lock-screen tracking you need a native Android build.</div>
+    </details>
+  </div>
+</div>
+
+<div id="alarm" hidden>
+  <div style="font-size:70px">🔔</div>
+  <h1>Your destination is nearby!</h1>
+  <div id="alarmDist"></div>
+  <button id="stopAlarm">Stop Alarm</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const store = {
+  get(k, d){ try { const v = localStorage.getItem('gpa.'+k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k, v){ try { localStorage.setItem('gpa.'+k, JSON.stringify(v)); } catch {} }
+};
+const DEFAULT_TILE = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const MAX_TILES = 600;
+let settings = Object.assign({tile: DEFAULT_TILE, theme: null, radius: 500, hiacc: true}, store.get('settings', {}));
+let favs = store.get('favs', []);
+let dest = store.get('dest', null);
+let pos = null, lastFix = 0, tracking = false, watchId = null, inside = false, alarmOn = false;
+let wakeLock = null, actx = null, beepTimer = null, dlCancel = false;
+
+/* ---------- Theme ---------- */
+function applyTheme(){
+  const t = settings.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  document.documentElement.dataset.theme = t;
+  document.querySelector('meta[name=theme-color]').content = t === 'dark' ? '#0b1117' : '#0f766e';
+}
+$('#themeBtn').onclick = () => {
+  settings.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  store.set('settings', settings); applyTheme();
+};
+applyTheme();
+
+/* ---------- Map ---------- */
+const lastView = store.get('view', {c: [30, 70], z: 4});
+const map = L.map('map', {zoomControl: false}).setView(lastView.c, lastView.z);
+L.control.zoom({position: 'topright'}).addTo(map);
+let tileLayer;
+function setTiles(){
+  if (tileLayer) map.removeLayer(tileLayer);
+  tileLayer = L.tileLayer(settings.tile, {maxZoom: 19, attribution: '© OpenStreetMap contributors'}).addTo(map);
+}
+setTiles();
+map.on('moveend', () => store.set('view', {c: [map.getCenter().lat, map.getCenter().lng], z: map.getZoom()}));
+
+const meMarker = L.marker([0,0], {icon: L.divIcon({className:'', html:'<div class="me"></div>', iconSize:[18,18], iconAnchor:[9,9]})});
+const accCircle = L.circle([0,0], {radius: 0, weight: 1, color: '#2563eb', fillOpacity: .1});
+let destMarker = null, radiusCircle = null;
+function destIcon(){ return L.divIcon({className:'', html:'<div class="pin">📍</div>', iconSize:[26,26], iconAnchor:[13,26]}); }
+
+map.on('click', e => setDest(e.latlng.lat, e.latlng.lng, 'Dropped pin'));
+
+/* ---------- Geo math ---------- */
+function haversine(a, b, c, d){
+  const R = 6371008.8, r = x => x * Math.PI / 180;
+  const dLat = r(c - a), dLon = r(d - b);
+  const h = Math.sin(dLat/2)**2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+const fmtDist = m => m < 1000 ? Math.round(m) + ' m' : (m/1000).toFixed(m < 10000 ? 2 : 1) + ' km';
+const radiusM = () => settings.radius;
+
+/* ---------- Destination ---------- */
+function setDest(lat, lng, name, fit){
+  dest = {lat, lng, name: name || 'Destination'};
+  store.set('dest', dest);
+  drawDest();
+  if (fit && !pos) map.setView([lat, lng], Math.max(map.getZoom(), 14));
+  checkProximity(); updateUI();
+}
+function drawDest(){
+  if (destMarker){ map.removeLayer(destMarker); destMarker = null; }
+  if (radiusCircle){ map.removeLayer(radiusCircle); radiusCircle = null; }
+  if (!dest) return;
+  destMarker = L.marker([dest.lat, dest.lng], {icon: destIcon()}).addTo(map);
+  radiusCircle = L.circle([dest.lat, dest.lng], {radius: radiusM(), color: '#dc2626', weight: 2, fillOpacity: .08}).addTo(map);
+}
+$('#clearDest').onclick = () => { dest = null; store.set('dest', null); inside = false; drawDest(); updateUI(); };
+$('#setLL').onclick = () => {
+  const la = parseFloat($('#lat').value), lo = parseFloat($('#lng').value);
+  if (!(la >= -90 && la <= 90 && lo >= -180 && lo <= 180)) return alert('Enter a valid latitude (-90..90) and longitude (-180..180).');
+  setDest(la, lo, 'Manual coordinates', true); map.setView([la, lo], 15);
+};
+$('#qBtn').onclick = async () => {
+  const q = $('#q').value.trim(); if (!q) return;
+  const ul = $('#results'); ul.innerHTML = '';
+  if (!navigator.onLine) return addLi(ul, 'Place search needs internet. Use the map or coordinates offline.');
+  try {
+    const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=5&q=' + encodeURIComponent(q));
+    const j = await r.json();
+    if (!j.length) return addLi(ul, 'No results.');
+    j.forEach(p => addLi(ul, p.display_name, 'Go', () => { setDest(+p.lat, +p.lon, p.display_name.split(',')[0]); map.setView([+p.lat, +p.lon], 15); ul.innerHTML = ''; }));
+  } catch { addLi(ul, 'Search failed (no internet or server busy).'); }
+};
+function addLi(ul, text, btnText, fn, del){
+  const li = document.createElement('li'), s = document.createElement('span');
+  s.textContent = text; li.append(s);
+  if (btnText){ const b = document.createElement('button'); b.textContent = btnText; b.onclick = fn; li.append(b); }
+  if (del){ const b = document.createElement('button'); b.className = 'del'; b.textContent = '✕'; b.onclick = del; li.append(b); }
+  ul.append(li);
+}
+
+/* ---------- Favorites ---------- */
+function renderFavs(){
+  const ul = $('#favs'); ul.innerHTML = '';
+  $('#noFavs').hidden = favs.length > 0;
+  favs.forEach((f, i) => addLi(ul, f.name, 'Go', () => { setDest(f.lat, f.lng, f.name); map.setView([f.lat, f.lng], 15); }, () => { favs.splice(i, 1); store.set('favs', favs); renderFavs(); }));
+}
+$('#saveFav').onclick = () => {
+  if (!dest) return alert('Choose a destination first.');
+  const name = prompt('Name this destination:', dest.name); if (!name) return;
+  favs.push({name: name.slice(0, 60), lat: dest.lat, lng: dest.lng});
+  store.set('favs', favs); renderFavs();
+};
+renderFavs();
+
+/* ---------- Radius ---------- */
+function initRadius(){
+  const sel = $('#radius');
+  if ([...sel.options].some(o => o.value == settings.radius)) sel.value = settings.radius;
+  else { sel.value = 'custom'; $('#customR').hidden = false; $('#customR').value = settings.radius; }
+}
+$('#radius').onchange = e => {
+  const c = e.target.value === 'custom';
+  $('#customR').hidden = !c;
+  if (!c) setRadius(+e.target.value); else $('#customR').focus();
+};
+$('#customR').oninput = e => { const v = +e.target.value; if (v >= 20) setRadius(v); };
+function setRadius(v){ settings.radius = v; store.set('settings', settings); if (radiusCircle) radiusCircle.setRadius(v); inside = false; checkProximity(); updateUI(); }
+$('#hiacc').checked = settings.hiacc;
+$('#hiacc').onchange = e => { settings.hiacc = e.target.checked; store.set('settings', settings); if (tracking){ stopWatch(); startWatch(); } };
+initRadius();
+
+/* ---------- UI update ---------- */
+function updateUI(){
+  if (pos) $('#coords').textContent = `Current: ${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)}  (±${Math.round(pos.acc)} m)`;
+  if (dest && pos){
+    const d = haversine(pos.lat, pos.lng, dest.lat, dest.lng);
+    $('#distVal').textContent = fmtDist(d);
+    $('#distSub').textContent = `${Math.round(d).toLocaleString()} m to ${dest.name} · alarm at ${fmtDist(radiusM())}`;
+    $('#alarmDist').textContent = `${fmtDist(d)} away`;
+  } else if (dest){
+    $('#distVal').textContent = '--'; $('#distSub').textContent = `Destination: ${dest.name} · waiting for GPS`;
+  } else { $('#distVal').textContent = '--'; $('#distSub').textContent = 'Tap the map to choose a destination'; }
+  $('#trackBtn').textContent = tracking ? 'Stop tracking' : 'Start tracking';
+  $('#trackBtn').classList.toggle('off', tracking);
+}
+function setGps(cls, text){
+  const c = $('#gpsChip'); c.className = 'chip ' + cls; $('#gpsTxt').textContent = text;
+}
+function gpsStatus(){
+  if (!tracking && !pos) return setGps('', 'GPS: off');
+  if (!pos) return setGps('warn', 'GPS: searching…');
+  const age = (Date.now() - lastFix) / 1000;
+  if (tracking && age > 20) return setGps('bad', `GPS: no update ${Math.round(age)}s`);
+  if (pos.acc <= 25) return setGps('ok', `GPS: strong ±${Math.round(pos.acc)}m`);
+  if (pos.acc <= 75) return setGps('warn', `GPS: fair ±${Math.round(pos.acc)}m`);
+  setGps('bad', `GPS: weak ±${Math.round(pos.acc)}m`);
+}
+function netStatus(){
+  const on = navigator.onLine;
+  $('#netChip').className = 'chip ' + (on ? 'ok' : 'bad');
+  $('#netTxt').textContent = on ? 'Online' : 'Offline · GPS & saved maps only';
+}
+addEventListener('online', netStatus); addEventListener('offline', netStatus); netStatus();
+setInterval(gpsStatus, 1000);
+
+function banner(msg){ const b = $('#banner'); b.textContent = msg || ''; b.style.display = msg ? 'block' : 'none'; }
+
+/* ---------- Location ---------- */
+let firstFixCentered = false;
+function onPos(p){
+  pos = {lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy || 0};
+  lastFix = Date.now(); banner('');
+  if (!map.hasLayer(meMarker)){ meMarker.addTo(map); accCircle.addTo(map); }
+  meMarker.setLatLng([pos.lat, pos.lng]); accCircle.setLatLng([pos.lat, pos.lng]).setRadius(pos.acc);
+  if (!firstFixCentered){ firstFixCentered = true; map.setView([pos.lat, pos.lng], Math.max(map.getZoom(), 15)); }
+  checkProximity(); updateUI(); gpsStatus();
+}
+function onErr(e){
+  const m = {1: 'Location permission denied. Allow location for this site in browser settings, then press Start again.',
+             2: 'Position unavailable. Turn on device GPS/Location and go outdoors or near a window.',
+             3: 'GPS timed out. Waiting for a signal…'}[e.code] || 'Location error.';
+  banner(m);
+  if (e.code === 1){ stopTracking(); }
+}
+function startWatch(){
+  watchId = navigator.geolocation.watchPosition(onPos, onErr, {enableHighAccuracy: settings.hiacc, maximumAge: 2000, timeout: 25000});
+}
+function stopWatch(){ if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; } }
+
+$('#locBtn').onclick = () => {
+  if (!navigator.geolocation) return banner('This browser has no geolocation support.');
+  if (pos) map.setView([pos.lat, pos.lng], Math.max(map.getZoom(), 16));
+  else navigator.geolocation.getCurrentPosition(onPos, onErr, {enableHighAccuracy: true, timeout: 20000});
+};
+
+/* ---------- Tracking ---------- */
+async function lockScreen(){ try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch {} }
+document.addEventListener('visibilitychange', () => {
+  if (!tracking) return;
+  if (document.visibilityState === 'visible'){
+    lockScreen();
+    const gap = (Date.now() - lastFix) / 1000;
+    if (gap > 30) banner(`Tracking may have paused while the app was hidden (${Math.round(gap)} s without GPS). Keep this app open for reliable alarms.`);
+  }
+});
+$('#trackBtn').onclick = async () => {
+  if (tracking) return stopTracking();
+  if (!navigator.geolocation) return banner('This browser has no geolocation support.');
+  if (!dest) return banner('Choose a destination first (tap the map).');
+  unlockAudio();
+  try { if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission(); } catch {}
+  try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch {}
+  tracking = true; inside = false; startWatch(); lockScreen(); updateUI(); gpsStatus();
+  banner('Tracking is ON. Keep this app open; the screen will stay awake to keep GPS running.');
+};
+function stopTracking(){
+  tracking = false; stopWatch(); inside = false;
+  try { wakeLock && wakeLock.release(); } catch {} wakeLock = null;
+  updateUI(); gpsStatus();
+}
+
+/* ---------- Proximity + alarm ---------- */
+function checkProximity(){
+  if (!tracking || !dest || !pos) return;
+  const d = haversine(pos.lat, pos.lng, dest.lat, dest.lng);
+  if (!inside && d <= radiusM()){ inside = true; startAlarm(); }
+  else if (inside && d > radiusM() * 1.1 + 10){ inside = false; }  // hysteresis: re-arm after leaving
+}
+function unlockAudio(){
+  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch {}
+}
+function beep(){
+  if (actx){
+    const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
+    o.type = 'square'; o.frequency.value = 900;
+    g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.5, t + .02); g.gain.exponentialRampToValueAtTime(.0001, t + .35);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + .4);
+  }
+  if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+}
+function startAlarm(){
+  if (alarmOn) return; alarmOn = true;
+  $('#alarm').hidden = false; updateUI(); beep(); beepTimer = setInterval(beep, 900); notify();
+}
+function stopAlarm(){
+  alarmOn = false; clearInterval(beepTimer); $('#alarm').hidden = true;
+  if (navigator.vibrate) navigator.vibrate(0);
+}
+$('#stopAlarm').onclick = stopAlarm;
+$('#testBtn').onclick = () => { unlockAudio(); startAlarm(); };
+async function notify(){
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const reg = await navigator.serviceWorker.getRegistration();
+    const o = {body: 'Your destination is nearby!', tag: 'gpa-alarm', requireInteraction: true, vibrate: [300, 150, 300], icon: 'icon-192.png'};
+    if (reg) reg.showNotification('GPS Proximity Alarm', o); else new Notification('GPS Proximity Alarm', o);
+  } catch {}
+}
+
+/* ---------- Offline map download ---------- */
+const lon2x = (lon, z) => Math.floor((lon + 180) / 360 * 2**z);
+const lat2y = (lat, z) => { const r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * 2**z); };
+function enumTiles(b, z0, z1){
+  const out = [], n = z => 2**z - 1;
+  for (let z = z0; z <= z1; z++){
+    const x0 = Math.max(0, lon2x(b.getWest(), z)), x1 = Math.min(n(z), lon2x(b.getEast(), z));
+    const y0 = Math.max(0, lat2y(Math.min(85.05, b.getNorth()), z)), y1 = Math.min(n(z), lat2y(Math.max(-85.05, b.getSouth()), z));
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) out.push({x, y, z});
+  }
+  return out;
+}
+const tileUrl = t => settings.tile.replace('{z}', t.z).replace('{x}', t.x).replace('{y}', t.y).replace('{s}', 'a').replace('{r}', '');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+$('#dlBtn').onclick = async () => {
+  if (!navigator.onLine) return ($('#dlMsg').textContent = 'You are offline. Connect to the internet to download maps.');
+  if (!('caches' in window)) return ($('#dlMsg').textContent = 'This browser cannot store offline maps.');
+  const b = map.getBounds(), z0 = Math.round(map.getZoom());
+  let z1 = Math.min(z0 + 3, 17), tiles = enumTiles(b, z0, z1);
+  while (tiles.length > MAX_TILES && z1 > z0){ z1--; tiles = enumTiles(b, z0, z1); }
+  if (tiles.length > MAX_TILES) return ($('#dlMsg').textContent = `Area too large (${tiles.length} tiles). Zoom in on a smaller area (limit ${MAX_TILES}).`);
+  const cache = await caches.open('tiles-v1');
+  dlCancel = false; $('#dlBtn').disabled = true; $('#dlCancel').hidden = false;
+  const prog = $('#prog'); prog.hidden = false; prog.max = tiles.length; prog.value = 0;
+  let done = 0, fail = 0;
+  for (const t of tiles){
+    if (dlCancel) break;
+    const u = tileUrl(t);
+    try {
+      if (!(await cache.match(u))){
+        const r = await fetch(u, {mode: 'cors'});
+        if (!r.ok) throw 0;
+        await cache.put(u, r); await sleep(150);   // be polite to the tile server
+      }
+    } catch { fail++; if (!navigator.onLine) break; }
+    prog.value = ++done;
+    $('#dlMsg').textContent = `Downloading zoom ${z0}–${z1}: ${done}/${tiles.length}` + (fail ? ` (${fail} failed)` : '');
+  }
+  $('#dlMsg').textContent = dlCancel ? `Cancelled at ${done}/${tiles.length}.` : `Done: ${done - fail}/${tiles.length} tiles saved for zoom ${z0}–${z1}. Zoom levels outside this range will not be available offline.`;
+  $('#dlBtn').disabled = false; $('#dlCancel').hidden = true; prog.hidden = true; showUsage();
+};
+$('#dlCancel').onclick = () => { dlCancel = true; };
+$('#clearMaps').onclick = async () => { if (confirm('Delete all downloaded offline maps?')){ await caches.delete('tiles-v1'); $('#dlMsg').textContent = 'Offline maps deleted.'; showUsage(); } };
+async function showUsage(){
+  try { const e = await navigator.storage.estimate(); $('#usage').textContent = `Storage used by this app: ${(e.usage / 1048576).toFixed(1)} MB`; } catch {}
+}
+$('#tileUrl').value = settings.tile;
+$('#tileApply').onclick = () => {
+  const v = $('#tileUrl').value.trim();
+  if (!/^https:\/\/.+\{z\}.+\{x\}.+\{y\}/.test(v)) return alert('Template must be https and contain {z}, {x} and {y}.');
+  settings.tile = v; store.set('settings', settings); setTiles();
+};
+showUsage();
+
+/* ---------- Boot ---------- */
+if (dest){ drawDest(); }
+updateUI(); gpsStatus();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
